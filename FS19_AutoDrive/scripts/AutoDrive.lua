@@ -1,5 +1,5 @@
 AutoDrive = {}
-AutoDrive.version = "1.1.0.7-RC1"
+AutoDrive.version = "1.1.0.9-RC1"
 
 AutoDrive.directory = g_currentModDirectory
 
@@ -9,6 +9,7 @@ g_autoDriveDebugUIFilename = AutoDrive.directory .. "textures/gui_debug_Icons.dd
 AutoDrive.experimentalFeatures = {}
 AutoDrive.experimentalFeatures.redLinePosition = false
 AutoDrive.experimentalFeatures.dynamicChaseDistance = false
+AutoDrive.experimentalFeatures.enableRoutesManagerOnDediServer = false
 
 AutoDrive.smootherDriving = true
 AutoDrive.developmentControls = false
@@ -56,6 +57,8 @@ AutoDrive.EDITOR_ON = 2
 AutoDrive.EDITOR_EXTENDED = 3
 AutoDrive.EDITOR_SHOW = 4
 
+AutoDrive.MAX_BUNKERSILO_LENGTH = 100 -- length of bunker silo where speed should be lowered
+
 AutoDrive.toggleSphrere = true
 AutoDrive.enableSphrere = true
 
@@ -87,8 +90,14 @@ AutoDrive.actions = {
 	{"ADSwapTargets", false, 0},
 	{"AD_open_notification_history", false, 0},
 	{"AD_continue", false, 3},
-	{"ADParkVehicle", false, 0}
+	{"ADParkVehicle", false, 0},
+	{"AD_devAction", false, 0}
+	-- {"COURSEPLAY_MOUSEACTION_SECONDARY", true, 1}
 }
+
+function AutoDrive:onAllModsLoaded()
+	ADThirdPartyModsManager:load()
+end
 
 function AutoDrive:loadMap(name)
 g_logManager:info("[AD] Start register later loaded mods...")
@@ -143,6 +152,7 @@ g_logManager:info("[AD] Start register later loaded mods end")
 	FSBaseMission.saveSavegame = Utils.appendedFunction(FSBaseMission.saveSavegame, AutoDrive.saveSavegame)
 
 	LoadTrigger.onActivateObject = Utils.overwrittenFunction(LoadTrigger.onActivateObject, AutoDrive.onActivateObject)
+	AIDriveStrategyCombine.getDriveData = Utils.overwrittenFunction(AIDriveStrategyCombine.getDriveData, AutoDrive.getDriveData)
 	LoadTrigger.getIsActivatable = Utils.overwrittenFunction(LoadTrigger.getIsActivatable, AutoDrive.getIsActivatable)
 	LoadTrigger.onFillTypeSelection = Utils.overwrittenFunction(LoadTrigger.onFillTypeSelection, AutoDrive.onFillTypeSelection)
 
@@ -166,6 +176,7 @@ g_logManager:info("[AD] Start register later loaded mods end")
 	ADDrawingManager:load()
 	ADMessagesManager:load()
 	ADHarvestManager:load()
+        ADScheduler:load()
 	ADInputManager:load()
 	ADMultipleTargetsManager:load()
 end
@@ -200,7 +211,7 @@ function AutoDrive:saveSavegame()
 			end
 		end
 ]]
-        AutoDrive.saveToXML(AutoDrive.adXml)
+        AutoDrive.saveToXML()
 		ADUserDataManager:saveToXml()
 --        g_logManager:info("[AD] AutoDrive:saveSavegame g_server ~= nil end")
 	end
@@ -209,7 +220,7 @@ end
 
 function AutoDrive:deleteMap()
 	-- this function is called even befor the game is compeltely started in case you insert a wrong password for mp game, so we need to check that "mapHotspotsBuffer" and "unRegisterDestinationListener" are not nil
-	if g_dedicatedServerInfo == nil and AutoDrive.mapHotspotsBuffer ~= nil then
+	if AutoDrive.mapHotspotsBuffer ~= nil then
 		-- Removing and deleting all map hotspots
 		for _, mh in pairs(AutoDrive.mapHotspotsBuffer) do
 			g_currentMission:removeMapHotspot(mh)
@@ -217,14 +228,12 @@ function AutoDrive:deleteMap()
 		end
 	end
 	AutoDrive.mapHotspotsBuffer = {}
+	AutoDrive.mapHotspotsBuffer = nil
 
 	if (AutoDrive.unRegisterDestinationListener ~= nil) then
 		AutoDrive:unRegisterDestinationListener(AutoDrive)
 	end
 	ADRoutesManager:delete()
-	if g_server ~= nil then
-		delete(AutoDrive.adXml)
-	end
 end
 
 function AutoDrive:keyEvent(unicode, sym, modifier, isDown)
@@ -273,12 +282,18 @@ function AutoDrive:update(dt)
 	if AutoDrive.isFirstRun == nil then
 		AutoDrive.isFirstRun = false
 		self:init()
+                if AutoDrive.devAutoDriveInit ~= nil then
+                    AutoDrive.devAutoDriveInit()
+                end
 	end
 
 	if AutoDrive.getDebugChannelIsSet(AutoDrive.DC_NETWORKINFO) then
 		if AutoDrive.debug.lastSentEvent ~= nil then
 			AutoDrive.renderTable(0.3, 0.9, 0.009, AutoDrive.debug.lastSentEvent)
 		end
+	end
+	if AutoDrive.getDebugChannelIsSet(AutoDrive.DC_SENSORINFO) and AutoDrive.getDebugChannelIsSet(AutoDrive.DC_VEHICLEINFO) then
+		AutoDrive.debugDrawBoundingBoxForVehicles()
 	end
 
 	if AutoDrive.Hud ~= nil then
@@ -289,6 +304,7 @@ function AutoDrive:update(dt)
 
 	if g_server ~= nil then
 		ADHarvestManager:update(dt)
+		ADScheduler:update(dt)
 	end
 
 	ADMessagesManager:update(dt)
